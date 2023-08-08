@@ -12,7 +12,7 @@ import logging
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 
-def failover(rec_res_group_name,app_service_name,web_client,resource_client,client, resource_group_name,locations,recovery_region,rec_id):
+def failover(rec_res_group_name,app_service_name,web_client,resource_client,client, resource_group_name,locations,recovery_region,rec_id,db_connection):
     server=client.servers.list_by_resource_group(resource_group_name)
     # logging.info(server)
     server_list=[]
@@ -74,7 +74,7 @@ def failover(rec_res_group_name,app_service_name,web_client,resource_client,clie
                 "database_name_pri" : database_name,
                 "link_id"  : database_link_id
             }
-                store_json_in_existing_container(source, "payload", rec_id, "DefaultEndpointsProtocol=https;AccountName=recoveryresourcepayload;AccountKey=t8dJ961d0c/2Y+Hwv+/UYnNyZEzKq2U7zaEuJDQPxu5MSLkX1ldJ6OAtexk8hRZbydqlELsbO99h+AStH3s4/Q==;EndpointSuffix=core.windows.net")
+                store_json_in_existing_container(source, "payload", rec_id, db_connection)
                 logging.info("failover to completed to server %s",replica_server)
                 connection_string = "DRIVER={ODBC Driver 17 for SQL Server};SERVER=tcp:"+replica_server_rg+".database.windows.net,1433;DATABASE=main-east-us-db;UID=sqluser;PWD=Apnx#1122"
                 update_conn_string("CONNECTION_STRING", connection_string)
@@ -140,6 +140,7 @@ def HttpTrigger(req: func.HttpRequest) -> func.HttpResponse:
         client_id = os.environ["CLIENT_ID"]
         client_secret = os.environ["CLIENT_SECRET"]
         tenant_id = os.environ["TENANT_ID"]
+        db_connection = os.environ["DB_CONNECTION"]
 
         # Create a client secret credential object
         credential = ClientSecretCredential(
