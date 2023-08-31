@@ -5,7 +5,7 @@ from azure.mgmt.resource import ResourceManagementClient
 from time import sleep
 from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
 import json
-
+import os
 import azure.functions as func
 from azure.identity import ClientSecretCredential
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
@@ -60,11 +60,11 @@ def HttpTrigger(req: func.HttpRequest) -> func.HttpResponse:
                     # recovery_subscription_id = item_data['cloudResourceReferenceId'].split("/")[2]
                     break
 
-        client_id       = "234342a8-eeeb-4e87-8b29-a6cfa4e1cec9"
-        client_secret   = "Q4k8Q~YqdIJ4qa2OiBnDjpfaE5-hOxRvXFWkOaWO"
-        tenant_id       = "976ace6a-6df4-47c0-9e7f-64dde4491107"
+        client_id = os.environ["CLIENT_ID"]
+        client_secret = os.environ["CLIENT_SECRET"]
+        tenant_id = os.environ["TENANT_ID"]
         
-        connection_string = "DefaultEndpointsProtocol=https;EndpointSuffix=core.windows.net;AccountName=apnxharistorageacc;AccountKey=9paDHTeh4COXVxHyupu8ous3nDS7w2DdJH3rN2YPosPkHweLAkcGS3W9JgR/aoOTW5EjBMTYlz89+AStwEq8vA==;BlobEndpoint=https://apnxharistorageacc.blob.core.windows.net/;FileEndpoint=https://apnxharistorageacc.file.core.windows.net/;QueueEndpoint=https://apnxharistorageacc.queue.core.windows.net/;TableEndpoint=https://apnxharistorageacc.table.core.windows.net/"
+        connection_string = os.environ["STORAGE_STRING"]
         container_name = "recovery-reset"
         file_name = f"{deployment_name}.json"
 

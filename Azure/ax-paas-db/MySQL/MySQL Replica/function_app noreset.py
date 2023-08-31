@@ -5,6 +5,7 @@ from azure.mgmt.resource import ResourceManagementClient
 from time import sleep
 from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
 import json
+import os
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
@@ -43,9 +44,9 @@ def HttpTrigger(req: func.HttpRequest) -> func.HttpResponse:
                     # recovery_subscription_id = item_data['cloudResourceReferenceId'].split("/")[2]
                     break
 
-        client_id       = "234342a8-eeeb-4e87-8b29-a6cfa4e1cec9"
-        client_secret   = "Q4k8Q~YqdIJ4qa2OiBnDjpfaE5-hOxRvXFWkOaWO"
-        tenant_id       = "976ace6a-6df4-47c0-9e7f-64dde4491107"
+        client_id = os.environ["CLIENT_ID"]
+        client_secret = os.environ["CLIENT_SECRET"]
+        tenant_id = os.environ["TENANT_ID"]
         
         # Create a client secret credential object
         credential = ClientSecretCredential(
