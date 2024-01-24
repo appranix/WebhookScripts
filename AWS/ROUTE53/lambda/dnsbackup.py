@@ -1,4 +1,5 @@
 import json
+import os
 import time
 from datetime import datetime
 import boto3
@@ -6,14 +7,18 @@ from botocore.exceptions import ClientError
 import logging
 
 logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
+
 message = "Something went wrong !!!"
 
-bucket_name = 'appranix-bucket-for-dnsbackup'
-region = 'us-east-2'
+bucket_name = os.environ.get('BUCKET_NAME')
+region = os.environ.get('REGION')
 s3 = boto3.client('s3')
 route53 = boto3.client('route53')
 
+#TODO change this
+hosted_zones = os.environ.get('HOSTED_ZONE_ID')
+hosted_zones_to_backup = hosted_zones.split(',')
 
 def create_bucket_if_not_exist(region):
     try:
@@ -61,21 +66,13 @@ def create_bucket_if_not_exist(region):
                 logger.info(f"Different Error Code {e.response['Error']['Code']}")
         except Exception as e:
             logger.info(f"Entirely Different Error Mesage {e.message}")
-
-
-def get_route53_hosted_zones(next_dns_name=None, next_hosted_zone_id=None):
-    if next_dns_name and next_hosted_zone_id:
-        response = route53.list_hosted_zones_by_name(DNSName=next_dns_name, HostedZoneId=next_hosted_zone_id)
-    else:
-        response = route53.list_hosted_zones_by_name()
-    zones = response['HostedZones']
-    if response['IsTruncated']:
-        zones += get_route53_hosted_zones(response['NextDNSName'], response['NextHostedZoneId'])
-
-    private_hosted_zones = list(filter(lambda x: x['Config']['PrivateZone'], zones))
-    for zone in private_hosted_zones:
-        zone['VPCs'] = route53.get_hosted_zone(Id=zone['Id'])['VPCs']
-    return zones
+            
+def get_route_hosted_zone(hosted_zone_ids):
+    zones = []
+    for hosted_zone_id in hosted_zone_ids:
+        response = route53.get_hosted_zone(Id=hosted_zone_id)
+        zones.append(response['HostedZone'])    
+    return zones 
 
 
 def get_route53_zone_records(zone_id, start_record_name=None, start_record_type=None):
@@ -109,7 +106,7 @@ def lambda_handler(event, context):
 
     create_bucket_if_not_exist(region)
 
-    hosted_zones = get_route53_hosted_zones()
+    hosted_zones = get_route_hosted_zone(hosted_zones_to_backup)
     s3.put_object(Body=json.dumps(hosted_zones).encode(), Bucket=bucket_name, Key='{}/zones.json'.format(timestamp))
 
     for zone in hosted_zones:
@@ -128,6 +125,7 @@ def lambda_handler(event, context):
     message = "Success: {} zones backed up and {} health checks backed up at {}".format(len(hosted_zones), len(health_checks), timestamp)
     logger.info(message)
 
-    return {
-        "message" : message
+    return{
+        "statusCode" : 200,
+        "body" : json.dumps(message)
     }

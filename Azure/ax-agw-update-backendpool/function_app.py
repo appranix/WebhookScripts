@@ -1,11 +1,10 @@
 import azure.functions as func
-import logging
-import requests
-import json, os
+import logging, requests, json, os, requests
 from azure.identity import ClientSecretCredential
-from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient, ContentSettings
+from azure.storage.blob import BlobServiceClient,ContentSettings
 from azure.mgmt.compute import ComputeManagementClient
 from azure.mgmt.network import NetworkManagementClient
+from azure.keyvault.secrets import SecretClient
 
 # Define your Azure Storage account connection string and blob details
 storage_connection_string = os.getenv("STORAGE_CONNECTION_STRING")
@@ -13,6 +12,11 @@ container_name = os.getenv("STORAGE_CONTAINER")
 tenant_id = os.getenv("TENANT_ID")
 client_id = os.getenv("CLIENT_ID")
 client_secret = os.getenv("CLIENT_SECRET")
+
+dr_midentity_resource_id = os.getenv("DR_MIDENTITY_RESOURCE_ID")
+dr_keyvault_name = os.getenv("DR_KEYVAULT_NAME")
+primary_keyvault_name = os.getenv("PRIMARY_KEYVAULT_NAME")
+dr_keyvault_uri = f"https://{dr_keyvault_name}.vault.azure.net/"
 
 # Get a credential object using the ClientSecretCredential
 credential = ClientSecretCredential(tenant_id, client_id, client_secret)
@@ -123,8 +127,6 @@ def get_resource_group(recovery_name, source_resource_details):
     logging.warning(f"Updated Resource Group Mapping: {rg_mapping_dict}")
 
     upload_info(storage_connection_string, container_name, blob_name, rg_mapping_dict)
-
-
 
 
 ## App Gateway backend pool attachment script
@@ -252,3 +254,86 @@ def read_attachment_info(storage_connection_string, container_name, blob_name, d
         logging.warning(f"Blob {blob_name} doesn't exists in the container {container_name}")
         return json.loads(default_value)
 
+## Update App Gateway SSL Cert script
+@app.route(route="update_app_gateway_ssl_cert", auth_level=func.AuthLevel.ANONYMOUS)
+def update_app_gateway_ssl_cert(req: func.HttpRequest) -> func.HttpResponse:
+    logging.warning('Python HTTP trigger function processed a request to update the SSL Certificate.')
+    
+    try:
+        subscription_id = dr_midentity_resource_id.split('/')[2]
+        network_client = NetworkManagementClient(credential, subscription_id)
+        bep_resource_id = read_attachment_info(storage_connection_string, container_name, blob_name='app_gateway_mapper.json', default_value={})
+        updated_agw = []
+        for resource_id in bep_resource_id.keys():
+            application_gateway_name, resource_group_name = extract_resource_info(resource_id)
+            if application_gateway_name not in updated_agw:
+                application_gateway = network_client.application_gateways.get(
+                    resource_group_name,
+                    application_gateway_name
+                )
+                logging.warning(f"Found Application Gateway '{application_gateway_name}' in Resource Group '{resource_group_name}' and region '{application_gateway.location}'")
+                
+                if application_gateway.identity and application_gateway.identity.user_assigned_identities:
+                    # Find the current identity
+                    current_identity = list(application_gateway.identity.user_assigned_identities.keys())[0]
+
+                    logging.warning(f"Current Identity for {application_gateway_name}: {current_identity}")
+                    
+                    # Replace it with a new identity (replace 'new_identity_resource_id' with the new identity's resource ID)
+                    new_identity_resource_id = dr_midentity_resource_id
+                    application_gateway.identity.user_assigned_identities = {new_identity_resource_id: {}}
+            
+                    logging.warning(f"Updating Identity for {application_gateway_name}: {new_identity_resource_id}")
+                
+                for certificate in application_gateway.ssl_certificates:
+                    logging.error(f"{certificate}......{certificate.name}")
+                    new_cert_name = certificate.key_vault_secret_id.split('/')[-1]                  
+                    
+                    if is_certificate_in_dr_keyvault(new_cert_name):
+                        new_vault_secret_id = certificate.key_vault_secret_id.replace(primary_keyvault_name, dr_keyvault_name)
+                        # If the secret ID is updated and the certificate is in DR Key Vault, redeploy the Application Gateway
+                        certificate.key_vault_secret_id = new_vault_secret_id
+                        logging.warning(f"Updated active SSL certificate Key Vault secret ID: {certificate.key_vault_secret_id}")
+                deploy_app_gateway(network_client, resource_group_name, application_gateway_name, application_gateway)
+                updated_agw.append(application_gateway_name)
+        
+    except Exception as e:
+        logging.error(f"Something went wrong {e}")
+        return func.HttpResponse("500")
+    return func.HttpResponse("200")
+
+def is_certificate_in_dr_keyvault(new_cert_name):
+    secret_client = SecretClient(vault_url=dr_keyvault_uri, credential=credential)
+    try:
+        secret_client.get_secret(new_cert_name)
+        logging.warning(f"The secret '{new_cert_name}' exists in the Key Vault {dr_keyvault_uri}.")
+        return True
+    except Exception as e:
+        logging.warning(f"The secret '{new_cert_name}' does not exist in the Key Vault {dr_keyvault_uri}. Error: {str(e)}")
+        return False
+    
+def extract_resource_info(resource_id):
+    resource_group_mapper = read_attachment_info(storage_connection_string, container_name, blob_name='resource_group_mapper.json', default_value={})
+    parts = resource_id.split('/')
+    
+    # Find the index of 'resourceGroups' and 'applicationGateways' in the parts list
+    rg_index = parts.index('resourceGroups')
+    agw_index = parts.index('applicationGateways')
+
+    # Extract the Resource Group name and Application Gateway name
+    resource_group_name = parts[rg_index + 1]
+    application_gateway_name = parts[agw_index + 1]
+    
+    return application_gateway_name, resource_group_mapper[resource_group_name]
+    
+def deploy_app_gateway(network_client, resource_group_name, application_gateway_name, application_gateway):
+    try:
+        async_operation = network_client.application_gateways.begin_create_or_update(
+                resource_group_name=resource_group_name,
+                application_gateway_name=application_gateway_name,
+                parameters=application_gateway
+            )
+        async_operation.result()
+        logging.warning(f"Application Gateway {application_gateway_name} redeployment successful.")
+    except Exception as e:
+        logging.warning(f"Exception occured while redeploying the {application_gateway_name}. Error: {str(e)}")
