@@ -1,4 +1,5 @@
 import boto3
+import os
 import json
 import time
 from datetime import datetime
@@ -6,10 +7,11 @@ from botocore.exceptions import ClientError
 import logging
 
 logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
+
 message = "Something went wrong !!!"
 
-bucket_name = 'appranix-bucket-for-dnsbackup'
+bucket_name = os.environ.get('BUCKET_NAME')
 s3 = boto3.client('s3')
 route53 = boto3.client('route53')
 
@@ -87,7 +89,7 @@ def get_route53_health_checks(marker=None):
 def lambda_handler(event, context):
     logger.info(str(event))
     backup_time = get_s3_object_as_string('latest_backup_timestamp').decode()
-    logger.info('Restoring from backup taken at {}'.format(backup_time))
+    logger.info('Restoring from backup taken at {} '.format(backup_time))
 
     zones = json.loads(get_s3_object_as_string('{}/zones.json'.format(backup_time)))
     for zone_obj in zones:
@@ -118,13 +120,9 @@ def lambda_handler(event, context):
 
         if len(health_check_to_create.get('Tags', [])) > 0:
             route53.change_tags_for_resource(ResourceType='healthcheck', ResourceId=created['Id'], AddTags=health_check_to_create['Tags'])
-    logger.info('Restored backup from {}'.format(backup_time))
+    message = 'Restored backup from {} '.format(backup_time)
+    logger.info(message)
     return {
-        "message": 'Restored backup from {}'.format(backup_time)
-        }
-
-
-# if __name__ == '__main__':
-#     event =""
-#     context = ""
-#     logger.info(lambda_handler(event, context))
+        "statusCode": 200,
+        "body": json.dumps(message)
+    }
