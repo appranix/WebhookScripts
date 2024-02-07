@@ -69,4 +69,3 @@ l
 
 def get_sys_mgr_ips():
     return re.findall(r'[0-9]+(?:\.[0-9]+){3}', os.environ['sys_mgr_ips'])
-
