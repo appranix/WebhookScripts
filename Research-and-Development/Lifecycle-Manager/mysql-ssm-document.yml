@@ -1,0 +1,235 @@
+schemaVersion: '2.2'
+description: Amazon Data Lifecycle Manager Pre/Post script for MySQL databases
+parameters:
+  region:
+    type: String
+    default: us-east-1
+    description: (Required) Specifies the Region of the instances to execute
+  waitTimeToUnfreeze:
+    type: String
+    default: "60"
+    description: (Optional) Specifies the wait time in seconds before unfreezing
+  mysqlUserName:
+    type: String
+    default: ""
+    description: (Required) Specifies the username of the MySQL database
+  mysqlPassword:
+    type: String
+    default: ""
+    description: (Required) Specifies the password of the MySQL database
+  mysqlHost:
+    type: String
+    default: ""
+    description: (Required) Specifies the hostname of the MySQL database
+
+mainSteps:
+- action: aws:runShellScript
+  description: Run MySQL Database freeze commands
+  name: run_mysql_dlm_scripts
+  precondition:
+    StringEquals:
+    - platformType
+    - Linux
+  inputs:
+    runCommand:
+    - |
+      #!/bin/bash
+      ###=================================================================###
+      ### Global variables
+      ###=================================================================###
+      START=$(date +%s)
+      FS_ALREADY_FROZEN_ERROR='freeze failed: Device or resource busy'
+      FS_ALREADY_THAWED_ERROR='unfreeze failed: Invalid argument'
+      FS_BUSY_ERROR='mount point is busy'
+
+      # Auto thaw is a fail safe mechanism to automatically unfreeze the application after the 
+      # duration specified in the global variable below. Choose the duration based on your
+      # database application's tolerance to freeze.
+      AUTO_THAW_DURATION_SECS={{waitTimeToUnfreeze}}
+
+      # Execute Auto Thaw to automatically unfreeze the application after the duration configured 
+      # in the AUTO_THAW_DURATION_SECS global variable.
+      execute_schedule_auto_thaw() {
+          sleep ${AUTO_THAW_DURATION_SECS}
+          execute_post_script
+      }
+
+      # Add all pre-script actions to be performed within the function below
+      execute_pre_script() {
+          echo "INFO: Start execution of pre-script"
+          # Check if filesystem is already frozen. No error code indicates that filesystem 
+          # is not currently frozen and that the pre-script can proceed with freezing the filesystem.
+          check_fs_freeze
+          # Execute the DB commands to flush the DB in preparation for snapshot
+          snap_db
+          # Freeze the filesystem. No error code indicates that filesystem was succefully frozen
+          freeze_fs
+
+          echo "INFO: Schedule Auto Thaw to execute in ${AUTO_THAW_DURATION_SECS} seconds."
+          # $(nohup bash -c execute_schedule_auto_thaw  >/dev/null 2>&1 &)
+          # execute_schedule_auto_thaw
+      }
+
+      # Add all post-script actions to be performed within the function below
+      execute_post_script() {
+          echo "INFO: Start execution of post-script"
+          # Unfreeze the filesystem. No error code indicates that filesystem was successfully unfrozen.
+          unfreeze_fs
+          thaw_db
+      }
+
+      # Disable Auto Thaw if it is still enabled
+      execute_disable_auto_thaw() {
+          echo "INFO: Attempting to disable auto thaw if enabled"
+          auto_thaw_pgid=$(pgrep -f execute_schedule_auto_thaw | xargs -i ps -hp {} -o pgid)
+          if [ -n "${auto_thaw_pgid}" ]; then
+              echo "INFO: execute_schedule_auto_thaw process found with pgid ${auto_thaw_pgid}"
+              sudo pkill -g ${auto_thaw_pgid}
+              rc=$?
+              if [ ${rc} != 0 ]; then
+                  echo "ERROR: Unable to kill execute_schedule_auto_thaw process. retval=${rc}"
+              else
+                  echo "INFO: Auto Thaw  has been disabled"
+              fi
+          fi
+      }
+
+      # Iterate over all the mountpoints and check if filesystem is already in freeze state.
+      # Return error code 204 if any of the mount points are already frozen.
+      check_fs_freeze() {
+          for target in $(lsblk -nlo MOUNTPOINTS)
+          do
+              # Freeze of the root and boot filesystems is dangerous and pre-script does not freeze these filesystems.
+              # Hence, we will skip the root and boot mountpoints while checking if filesystem is in freeze state.
+              if [ $target == '/' ]; then continue; fi
+              if [[ "$target" == *"/boot"* ]]; then continue; fi
+              if [[ "$target" == *"/snap"* ]]; then continue; fi
+              error_message=$(sudo mount -o remount,noatime $target 2>&1)
+              # Remount will be a no-op without a error message if the filesystem is unfrozen.
+              # However, if filesystem is already frozen, remount will fail with busy error message.
+              if [ $? -ne 0 ];then
+                  # If the filesystem is already in frozen, return error code 204
+                  if [[ "$error_message" == *"$FS_BUSY_ERROR"* ]];then
+                      echo "ERROR: Filesystem ${target} already frozen. Return Error Code: 204"
+                      exit 204
+                  fi
+                  # If the check filesystem freeze failed due to any reason other than the filesystem already frozen, return 201
+                  echo "ERROR: Failed to check_fs_freeze on mountpoint $target due to error - $errormessage"
+                  exit 201
+              fi
+          done
+      } 
+
+      # Iterate over all the mountpoints and freeze the filesystem.
+      freeze_fs() {
+          for target in $(lsblk -nlo MOUNTPOINTS)
+          do
+              # Freeze of the root and boot filesystems is dangerous. Hence, skip filesystem freeze 
+              # operations for root and boot mountpoints.
+              if [ $target == '/' ]; then continue; fi
+              if [[ "$target" == *"/boot"* ]]; then continue; fi
+              if [[ "$target" == *"/snap"* ]]; then continue; fi
+              echo "INFO: Freezing $target"
+              error_message=$(sudo fsfreeze -f $target 2>&1)
+              if [ $? -ne 0 ];then
+                  # If the filesystem is already in frozen, return error code 204
+                  if [[ "$error_message" == *"$FS_ALREADY_FROZEN_ERROR"* ]]; then
+                      echo "ERROR: Filesystem ${target} already frozen. Return Error Code: 204"
+                      sudo mysql --host="{{mysqlHost}}" --user="{{mysqlUserName}}" --password="{{mysqlPassword}}" -e 'UNLOCK TABLES;'
+                      exit 204
+                  fi
+                  # If the filesystem freeze failed due to any reason other than the filesystem already frozen, return 201
+                  echo "ERROR: Failed to freeze mountpoint $targetdue due to error - $errormessage"
+                  # thaw_db
+                  exit 201
+              fi
+              echo "INFO: Freezing complete on $target"
+          done
+      }
+
+      # Iterate over all the mountpoints and unfreeze the filesystem.
+      unfreeze_fs() {
+          for target in $(lsblk -nlo MOUNTPOINTS)
+          do
+              # Freeze of the root and boot filesystems is dangerous and pre-script does not freeze these filesystems.
+              # Hence, will skip the root and boot mountpoints during unfreeze as well.
+              if [ $target == '/' ]; then continue; fi
+              if [[ "$target" == *"/boot"* ]]; then continue; fi
+              if [[ "$target" == "/snap"* ]]; then continue; fi
+              echo "INFO: Unfreezing $target"
+              error_message=$(sudo fsfreeze -u $target 2>&1)
+              # Check if filesystem is already unfrozen (thawed). Return error code 204 if filesystem is already unfrozen.
+              if [ $? -ne 0 ]; then
+                  if [[ "$error_message" == *"$FS_ALREADY_THAWED_ERROR"* ]]; then
+                      echo "ERROR: Filesystem ${target} is already in thaw state. Return Error Code: 205"
+                      exit 205
+                  fi
+                  # If the filesystem unfreeze failed due to any reason other than the filesystem already unfrozen, return 202
+                  echo "ERROR: Failed to unfreeze mountpoint $targetdue due to error - $errormessage"
+                  exit 202
+              fi
+              echo "INFO: Unfreezing completed on $target"
+          done    
+      }
+
+      snap_db() {
+          # Run the flush command only when MySQL DB service is up and running
+          sudo systemctl is-active --quiet mysql.service
+          if [ $? -eq 0 ]; then
+              echo "INFO: Execute MySQL Flush and Lock command."
+              sudo mysql -h "{{mysqlHost}}" -u "{{mysqlUserName}}" -p"{{mysqlPassword}}" -e 'FLUSH TABLES WITH READ LOCK;'
+              # If the MySQL Flush and Lock command did not succeed, return error code 201 to indicate pre-script failure
+              if [ $? -ne 0 ]; then
+                  echo "ERROR: MySQL FLUSH TABLES WITH READ LOCK command failed."
+                  exit 201
+              fi
+              sync
+          else 
+              echo "INFO: MySQL service is inactive. Skipping execution of MySQL Flush and Lock command."
+          fi
+      }
+
+      thaw_db() {
+          # Run the unlock command only when MySQL DB service is up and running
+          sudo systemctl is-active --quiet mysql.service
+          if [ $? -eq 0 ]; then
+              echo "INFO: Execute MySQL Unlock"
+              sudo mysql -h "{{mysqlHost}}" -u "{{mysqlUserName}}" -p"{{mysqlPassword}}" -e 'UNLOCK TABLES;'
+          else 
+              echo "INFO: MySQL service is inactive. Skipping execution of MySQL Unlock command."
+          fi
+      }
+
+      export -f execute_schedule_auto_thaw
+      export -f execute_post_script
+      export -f unfreeze_fs
+      export -f thaw_db
+
+      execute_pre_script
+
+      sleep ${AUTO_THAW_DURATION_SECS}
+
+      privateIpAddress=$(hostname -I | awk '{print $1}')
+      echo "IP: $privateIpAddress"
+      instanceId=$(aws ec2 describe-instances --region {{region}} --filters "Name=private-ip-address,Values=$privateIpAddress" --query "Reservations[0].Instances[0].InstanceId" --output text)
+
+
+      echo "Triggering snapshot for instance: $instanceId"
+      snapshotOutput=$(aws ec2 create-snapshots --region {{region}} --instance-specification InstanceId="$instanceId" --copy-tags-from-source volume --description "Test snapshot of '$instanceId' with DLM Application Consistency Hooks via SSM" --output json)
+      # Extract the snapshot ID from the output
+      snapshotId=$(echo "$snapshotOutput" | awk '/"SnapshotId"/ {gsub(/[",]/, "", $2); print $2}')
+
+      # Output the snapshot ID
+      echo "Snapshot ID for instance $instanceId: $snapshotId"
+      
+      # Add a delay if needed to avoid API rate limits
+      sleep 3
+
+      echo "Snapshot trigger process completed for all instances...Executing the Post-script command to Unfreeze the file systems"
+
+      execute_post_script
+      execute_disable_auto_thaw
+
+      END=$(date +%s)
+      # Debug Log for profiling the script time
+      echo "INFO: Operation completed at $(date). Total runtime: $((${END} - ${START})) seconds."
