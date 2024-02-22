@@ -40,32 +40,6 @@ def get_secret(secrets_to_backup):
     
     return json.dumps(backup_secrets_data, indent=4)
 
-def get_restore_secret_details(credentials, secrets_to_restore):
-    secret_manager_client = boto3.client('secretsmanager',aws_access_key_id=credentials['AccessKeyId'], aws_secret_access_key=credentials['SecretAccessKey'], aws_session_token=credentials['SessionToken'], region_name="us-east-1")
-
-    # Create a dictionary to store key-value pairs
-    restoring_secrets_data = {}
-
-    # Iterate through each secrets, get the values and stores in the dictionary
-    for secret_name,secret_version in secrets_to_restore.items():
-        try:
-            secrets_response = secret_manager_client.get_secret_value(
-                SecretId=secret_name,
-                VersionId=secret_version
-            )
-            secrets_value = {
-                'SecretString': secrets_response['SecretString'],
-                'VersionId': secrets_response['VersionId']
-            }
-            restoring_secrets_data[secret_name] = secrets_value
-
-        except Exception as e:
-            logger.error(f"Error while retrieving secrets: {e}")
-    
-    logging.info(f"{restoring_secrets_data}")
-    
-    return json.dumps(restoring_secrets_data,indent=4)
-
 ## Invoke Lambdas in the operational regions to replicate/restore the secrets
 def invoke_lambda_function(credentials, lambda_function_name, secret_details, region):
     lambda_client = boto3.client('lambda', aws_access_key_id=credentials['AccessKeyId'], aws_secret_access_key=credentials['SecretAccessKey'], aws_session_token=credentials['SessionToken'], region_name=region)
