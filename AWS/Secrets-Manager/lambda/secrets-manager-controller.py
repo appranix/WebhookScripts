@@ -11,6 +11,19 @@ restore_lambda = os.environ.get('RESTORE_LAMBDA')
 replication_regions = os.environ.get('REPLICATION_REGIONS').split(',')
 account_arns = os.environ.get('ACCOUNT_ARNS').split(',')
 
+def handle_secret_manager_error(secret_name, error):
+    error_code = error.response['Error']['Code']
+    error_message = error.response['Error']['Message']
+    if error_code == 'AccessDeniedException':
+        logging.error(f"Access denied for secret {secret_name}: {error_message}")
+    elif error_code == 'InvalidParameterException':
+        logging.error(f"Invalid params for the secret {secret_name}: {error_message}")
+    elif error_code == 'InvalidRequestException':
+        logging.warning(f"Invalid request for secret {secret_name}: {error_message}. Skipping....")
+    else:
+        logging.error(f"Error fetching secret {secret_name}: {error_message}")
+    raise error
+
 def get_secret(secrets_to_backup):
 
     # Create a Secrets Manager client
@@ -23,22 +36,38 @@ def get_secret(secrets_to_backup):
             get_secret_value_response = secret_manager_client.get_secret_value(
                 SecretId=secret_name
             )
-            logging.info(get_secret_value_response)
             backup_secrets_data[secret_name] = {
                 "SecretString": get_secret_value_response["SecretString"],
                 "VersionId": get_secret_value_response["VersionId"]
             }
         except ClientError as e:
-            if e.response['Error']['Code'] == 'AccessDeniedException':
-                logging.error(f"Access denied for secret {secret_name}: {e}")
-            elif e.response['Error']['Code'] == 'InvalidParameterException':
-                logging.error(f"The request had invalid params for the secret {secret_name}: {e}")
-            elif e.response['Error']['Code'] == 'InvalidRequestException':
-                logging.warning(f"Invalid request for secret {secret_name}: {str(e)}. Skipping.")
-            else:
-                logging.error(f"Error fetching secret {secret_name}: {str(e)}")
+            handle_secret_manager_error(secret_name, e)
     
     return json.dumps(backup_secrets_data, indent=4)
+
+def get_restore_secret_details(credentials, secrets_to_restore):
+    secret_manager_client = boto3.client('secretsmanager',aws_access_key_id=credentials['AccessKeyId'], aws_secret_access_key=credentials['SecretAccessKey'], aws_session_token=credentials['SessionToken'], region_name="us-east-1")
+
+    # Create a dictionary to store key-value pairs
+    restoring_secrets_data = {}
+
+    # Iterate through each secrets, get the values and stores in the dictionary
+    for secret_name,secret_version in secrets_to_restore.items():
+        try:
+            secrets_response = secret_manager_client.get_secret_value(
+                SecretId=secret_name,
+                VersionId=secret_version
+            )
+            secrets_value = {
+                'SecretString': secrets_response['SecretString'],
+                'VersionId': secrets_response['VersionId']
+            }
+            restoring_secrets_data[secret_name] = secrets_value
+
+        except Exception as e:
+            logger.error(f"Error while retrieving secrets: {e}")
+    
+    return json.dumps(restoring_secrets_data,indent=4)
 
 ## Invoke Lambdas in the operational regions to replicate/restore the secrets
 def invoke_lambda_function(credentials, lambda_function_name, secret_details, region):
