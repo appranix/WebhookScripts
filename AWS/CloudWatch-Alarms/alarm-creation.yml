@@ -1,0 +1,57 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "CloudWatch Alarms for EC2 Instance Monitoring"
+
+Parameters:
+  InstanceId:
+    Type: "String"
+    Description: "EC2 Instance ID for which alarms should be created"
+  SnsTopicName:
+    Type: "String"
+    Description: "SNS topic name on which the alarms should be fired"
+
+Resources:
+  CPULowAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmName: "CPULowAlarm"
+      ComparisonOperator: "LessThanOrEqualToThreshold"
+      EvaluationPeriods: 1
+      MetricName: "CPUUtilization"
+      Namespace: "AWS/EC2"
+      Period: 300
+      Statistic: "Average"
+      Threshold: 20
+      ActionsEnabled: true
+      Dimensions:
+        - Name: "InstanceId"
+          Value: !Ref InstanceId
+      AlarmActions:
+        - !Ref SnsTopic
+
+  MemoryLowAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmName: "MemoryLowAlarm"
+      ComparisonOperator: "LessThanOrEqualToThreshold"
+      EvaluationPeriods: 1
+      MetricName: "MemoryAvailable"
+      Namespace: "System/Linux"
+      Period: 300
+      Statistic: "Average"
+      Threshold: 500000000  # In Bytes
+      ActionsEnabled: true
+      Dimensions:
+        - Name: "InstanceId"
+          Value: !Ref InstanceId
+      AlarmActions:
+        - !Ref SnsTopic
+
+  SnsTopic:
+    Type: "AWS::SNS::Topic"
+    Properties:
+      TopicName: !Ref SnsTopicName
+
+Outputs:
+  AlarmsSNSTopic:
+    Description: "SNS Topic for CloudWatch Alarms"
+    Value: !Ref SnsTopic
