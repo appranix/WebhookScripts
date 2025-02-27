@@ -34,7 +34,6 @@
 **Reference**: [Zip archives for AWS Lambda](https://docs.aws.amazon.com/lambda/latest/dg/python-package.html#python-package-create-dependencies)
 
 **Note**: 
-
 - Make sure the security groups are allowed to access the lambda and the FSx cluster.
 - Make sure this lambda function is accessible to all the system manager IP’s.
 - If the FSx cluster is in another VPC then peer the VPCs and configure the lambda connection to the Peered VPC for the lambda to access the resources.
@@ -45,4 +44,5 @@
 - Both the `EnableNetAppReplication` and `DisableNetAppReplication` lambda functions scripts are customized and owned by the Customers based on their needs. 
 - Following are the environment variables for the lambda functions
 
-		basic_token → [Encoded token value of FSX cluster-admin username and password to authenticate](https://mixedanalytics.com/tools/basic-authentication-generator/)
+	
+	basic_token → [Encoded token value of FSX cluster-admin username and password to authenticate](https://mixedanalytics.com/tools/basic-authentication-generator/)
