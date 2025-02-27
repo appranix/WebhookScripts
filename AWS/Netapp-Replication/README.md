@@ -5,6 +5,15 @@
 ![NetApp Replication Workflow](netapp-replication-workflow.jpeg)
 
 
+### Resposibities and Purposes
+
+| Scripts               | Responsibility     | Purpose                                                                                         |
+|-----------------------|--------------------|-------------------------------------------------------------------------------------------------|
+| ControllerScripts     |  Cloud ReWind      | Iterates over the NetApp System Manager IPs and passes it to the `ReplicationHandler` function  |
+| ReplicationHandler    |  Customers/Users   | Enables/Disables the NetApp Replication using the System Manager IP                             |
+
+### Overview
+
 - Cloud ReWind Webhook Functionality will trigger 'Pre-Recovery' Webhook call to the `DisableNetAppReplicationControllerLambda` Script to disable the NetApp Replication at the time of recovering the source region resources.
 - During the reset of the recovered resources, Cloud ReWind Webhook Functionality will trigger 'Pre-Reset' Webhook call to the `EnableNetAppReplicationControllerLambda` Script to enable the Replication among the NetApp Servers.
 
