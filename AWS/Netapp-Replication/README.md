@@ -10,7 +10,7 @@
 | Scripts               | Responsibility     | Purpose                                                                                         |
 |-----------------------|--------------------|-------------------------------------------------------------------------------------------------|
 | ControllerScripts     |  Cloud ReWind      | Iterates over the NetApp System Manager IPs and passes it to the `ReplicationHandler` function  |
-| ReplicationHandler    |  Customers/Users   | Enables/Disables the NetApp Replication using the System Manager IP                             |
+| ReplicationHandlers   |  Customers/Users   | Enables/Disables the NetApp Replication using the System Manager IP                             |
 
 ### Overview
 
@@ -21,8 +21,8 @@
 
 
 ### DisableNetAppReplicationControllerLambda (Pre-Recovery Webhook Lambda)
-- Create a lambda function with `Python 3.11` runtime by deploying the ZIP archives, with a timeout of 5 mins, that triggers the `DisableNetAppReplication` script for each system manager IPs.
-- This function will validate the webhook token (ax_token) and passes each system manager IPs to the `DisableNetAppReplication` lambda endpoint for disabling the replication of NetApp servers.
+- Create a lambda function with `Python 3.11` runtime by deploying the ZIP archives, with a timeout of 5 mins, that triggers the `DisableNetAppReplicationHandler` script for each system manager IPs.
+- This function will validate the webhook token (ax_token) and passes each system manager IPs to the `DisableNetAppReplicationHandler` lambda endpoint for disabling the replication of NetApp servers.
 - Following are the environment variables for the lambda function
 
 		disable_url → Endpoint URL of the `DisableNetappReplicationLambda`
@@ -32,8 +32,8 @@
 	Example Pre-Recovery Webhook Endpoint: https://example.com/path?ax_token=I_am_Spartacus
 
 ### EnableNetAppReplicationControllerLambda (Pre-Reset Webhook Lambda)
-- Create a lambda function with `Python 3.11` runtime by deploying the ZIP archives, with a timeout of 5 mins, that triggers the `EnableNetAppReplication` script for each system manager IPs.
-- This function will validate the webhook token (ax_token) and passes each system manager IPs to the `EnableNetAppReplication` lambda endpoint for enabling the replication of NetApp servers.
+- Create a lambda function with `Python 3.11` runtime by deploying the ZIP archives, with a timeout of 5 mins, that triggers the `EnableNetAppReplicationHandler` script for each system manager IPs.
+- This function will validate the webhook token (ax_token) and passes each system manager IPs to the `EnableNetAppReplicationHandler` lambda endpoint for enabling the replication of NetApp servers.
 - Following are the environment variables for the lambda function
 
 		enable_url  → Endpoint URL of the `EnableNetappReplicationLambda`
@@ -48,9 +48,9 @@
 - If the FSx cluster is in another VPC then peer the VPCs and configure the lambda connection to the Peered VPC for the lambda to access the resources.
 
 
-### EnableNetAppReplication and DisableNetAppReplication Lambda Functions (Invoked by the `NetAppReplicationControllerLambda` Functions)
+### EnableNetAppReplicationHandler and DisableNetAppReplicationHandler Lambda Functions (Invoked by the `NetAppReplicationControllerLambda` Functions)
 
-- Both the `EnableNetAppReplication` and `DisableNetAppReplication` lambda functions scripts are customized and owned by the Customers based on their needs. 
+- Both the `EnableNetAppReplicationHandler` and `DisableNetAppReplicationHandler` lambda functions scripts are customized and owned by the Customers based on their needs. 
 - Following are the environment variables for the lambda functions
 
 	
